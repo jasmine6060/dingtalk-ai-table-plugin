@@ -1,0 +1,14 @@
+{
+  "name": "wuqiong-skills",
+  "owner": {
+    "name": "wuqiong"
+  },
+  "plugins": [
+    {
+      "name": "dingtalk-ai-table",
+      "source": "./",
+      "description": "钉钉 AI 表格 / 多维表 (Notable) OpenAPI 集成手册",
+      "version": "1.0.0"
+    }
+  ]
+}

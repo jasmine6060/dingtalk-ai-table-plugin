@@ -1,0 +1,9 @@
+{
+  "name": "dingtalk-ai-table",
+  "description": "DingTalk AI 表格 / 多维表 (Notable) OpenAPI 集成手册：URL 路径、auth header、operatorId、列类型与诊断秘籍",
+  "version": "1.0.0",
+  "author": {
+    "name": "wuqiong"
+  },
+  "keywords": ["dingtalk", "钉钉", "ai-table", "notable", "多维表"]
+}
