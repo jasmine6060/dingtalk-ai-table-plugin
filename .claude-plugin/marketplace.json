@@ -7,8 +7,8 @@
     {
       "name": "dingtalk-ai-table",
       "source": "./",
-      "description": "钉钉 AI 表格 / 多维表 (Notable) OpenAPI 集成手册",
-      "version": "1.0.0"
+      "description": "钉钉 AI 表格 / 多维表 (Notable) OpenAPI 集成手册 + Stream 断重连 + QPS 90002 + Windows 计划任务常驻",
+      "version": "1.1.0"
     }
   ]
 }

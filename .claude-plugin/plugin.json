@@ -1,7 +1,7 @@
 {
   "name": "dingtalk-ai-table",
-  "description": "DingTalk AI 表格 / 多维表 (Notable) OpenAPI 集成手册：URL 路径、auth header、operatorId、列类型与诊断秘籍",
-  "version": "1.0.0",
+  "description": "DingTalk AI 表格 / 多维表 (Notable) OpenAPI 集成手册：URL 路径、auth header、operatorId、列类型、诊断秘籍；Stream 长连接断重连规律；QPS 90002 平台级限流应对；Windows 计划任务常驻部署 + 日志按天切分",
+  "version": "1.1.0",
   "author": {
     "name": "wuqiong"
   },
