@@ -1,6 +1,6 @@
 ---
 name: dingtalk-ai-table
-description: Integrate with DingTalk「AI 表格」/「多维表」OpenAPI (write/read records). Use when building DingTalk bots that collect data and write into AI 表格 / Notable / 多维表, or when debugging 404/400/403/500 from `/v1.0/notable/...` endpoints. Also covers DingTalk Stream long-connection reconnect patterns (normal vs real failure), QPS 90002 platform-wide rate-limit avoidance, and Windows always-on deployment via Task Scheduler + log rotation. Topics: correct URL paths, auth header, mandatory operatorId as unionId, app permissions, per-column-type value formats, fields→records diagnostic recipe, pythonw + InteractiveToken pitfalls, TimedRotatingFileHandler.
+description: Integrate with DingTalk「AI 表格」/「多维表」OpenAPI (write/read records). Use when building DingTalk bots that collect data and write into AI 表格 / Notable / 多维表, or when debugging 404/400/403/500 from `/v1.0/notable/...` endpoints. Also covers DingTalk Stream long-connection reconnect patterns (normal vs real failure), QPS 90002 platform-wide rate-limit avoidance, and Windows always-on deployment via Task Scheduler + log rotation. Topics: correct URL paths, auth header, mandatory operatorId as unionId, app permissions, per-column-type value formats, fields→records diagnostic recipe, pythonw + InteractiveToken pitfalls, dual-trigger self-healing (LogonTrigger + repeating TimeTrigger), start_forever() silent-exit fix, TimedRotatingFileHandler.
 ---
 
 # DingTalk AI 表格 (Notable) OpenAPI 集成手册
@@ -237,7 +237,7 @@ apiPath: dingtalk.oapi.v2.department.listsub
 让 bot 脱离 Claude Code / 终端会话，关机重启后自动起来。最轻量方案是 **Windows Task Scheduler**（零依赖、不用装服务框架）。
 
 关键设置：
-- **触发器**：登录时启动，延迟 10s 等网络就绪
+- **触发器**：登录时启动（延迟 10s 等网络就绪）**+ 每 5 分钟重复**兜底拉起（见坑 4）
 - **动作**：`pythonw.exe main.py`（无 console 窗口）+ `WorkingDirectory` 指向项目根
 - **失败重启**：`<RestartOnFailure>`，1 分钟间隔 × 10 次
 - **执行时长**：不限制（`<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>`）
@@ -257,6 +257,21 @@ apiPath: dingtalk.oapi.v2.department.listsub
 
 **坑 3 — `Last Result: 267009` 不是错误**：等于 `0x41301 = SCHED_S_TASK_RUNNING`，含义是"任务正在运行中"。`0x0` 才表示"上次成功完成"。新手容易误报警。
 
+**坑 4 — 单 `LogonTrigger` 不足以保证常驻**：登录触发器只在「用户登录的那一刻」触发一次。机器开着、用户一直登录着的情况下，如果 bot 进程死了，触发器**不会再触发**，`RestartOnFailure` 也只在进程以非零退出码结束时才生效（见下面「兜底：进程不能静默退出」）——结果 bot 可能一停就是好几天没人拉起。解决：再加一个**每 5 分钟重复**的 `TimeTrigger`，配合 `IgnoreNew`（进程在跑就跳过新实例，死了才真正拉起）：
+
+```xml
+<TimeTrigger>
+  <Repetition>
+    <Interval>PT5M</Interval>
+    <StopAtDurationEnd>false</StopAtDurationEnd>
+  </Repetition>
+  <StartBoundary>2026-01-01T00:00:00</StartBoundary>
+  <Enabled>true</Enabled>
+</TimeTrigger>
+```
+
+`<Repetition>` 不写 `<Duration>` 即「无限期重复」。这条触发器不会重复启动进程——`IgnoreNew` 保证已在跑就跳过。
+
 **完整可用的 XML 骨架**（替换 DOMAIN\username / 路径即可）：
 
 ```xml
@@ -268,6 +283,14 @@ apiPath: dingtalk.oapi.v2.department.listsub
       <UserId>DOMAIN\username</UserId>
       <Delay>PT10S</Delay>
     </LogonTrigger>
+    <TimeTrigger>
+      <Repetition>
+        <Interval>PT5M</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>2026-01-01T00:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+    </TimeTrigger>
   </Triggers>
   <Principals>
     <Principal id="Author">
@@ -307,6 +330,28 @@ schtasks /End    /TN "MyBot"
 schtasks /Query  /TN "MyBot" /V /FO LIST
 schtasks /Delete /TN "MyBot" /F
 ```
+
+### 兜底：进程不能静默退出
+
+光靠计划任务还不够。`dingtalk_stream` 的 `client.start_forever()` 在某些断连场景下会**正常 return**（不抛异常）而不是一直阻塞。一旦它 return，`main()` 跟着返回，Python 进程以退出码 `0` 结束——计划任务把 `0` 判定为「任务成功完成」，**`RestartOnFailure` 不会触发**（它只认非零退出码）。现象：日志最后停在一次正常的 `open connection` / `endpoint is ...`，之后什么都没有，没报错、没 traceback，进程就没了。
+
+修法：在入口用 `while True` 把 `start_forever()` 包起来，任何返回 / 异常都重连，确保进程**永不主动结束**：
+
+```python
+while True:
+    try:
+        client.start_forever()
+    except SystemExit:
+        raise                       # 信号处理里的 sys.exit(0)，放行正常关停
+    except Exception:
+        log.exception("Stream 连接循环异常，5 秒后重连…")
+        time.sleep(5)
+        continue
+    log.warning("Stream 连接循环正常返回，3 秒后重连…")
+    time.sleep(3)
+```
+
+「应用层 while 循环」兜软退出、「任务层 5 分钟 TimeTrigger」兜硬崩溃 / 关机重启，两层叠加才真正常驻——只靠任何一层都漏。
 
 ### 配套：日志按天切分
 
